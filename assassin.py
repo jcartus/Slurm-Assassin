@@ -19,7 +19,7 @@ class CalculationCrashed(DeadCalculation):
 
 
 
-class Assassin(object):
+class SlurmAssassin(object):
 
     def __init__(self, 
         timeout=15,
