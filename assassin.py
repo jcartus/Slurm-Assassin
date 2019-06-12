@@ -354,13 +354,13 @@ class SlurmAssassin(object):
 
         except CalculationCrashed as ex:
             
-            self.log("Calculation crashed!", 3)
+            self.log("Calculation crashed!" + str(ex), 3)
             self.send_email_notifcation_crashed()
 
 
         except CalculationTimeout as ex:
 
-            self.log("Calculation timed out!", 3)
+            self.log("Calculation timed out!" + str(ex), 3)
             self.send_email_notifcation_timeout()
 
             # stop the calculation process.
