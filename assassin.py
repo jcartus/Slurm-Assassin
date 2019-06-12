@@ -6,6 +6,8 @@ import subprocess as sp
 import os
 from datetime import datetime
 import time
+import smtplib
+from email.message import EmailMessage
 
 
 class DeadCalculation(RuntimeError):
@@ -26,7 +28,8 @@ class SlurmAssassin(object):
         polling_period=5,
         out_file_name="aims.out",
         err_file_name="aims.err",
-        log_file="assassin.log"
+        log_file="assassin.log",
+        email=None
     ):
         """Args:
             timeout: time after which a non-responsive calculation is assumed 
@@ -43,6 +46,10 @@ class SlurmAssassin(object):
                 If critical messages are found, the calculation is aborted 
                 (even is time out is not reached yet).
             log_file: Name of the file the assassin will write log messages to.
+            email: The email address, that potential notifications (e.g. if
+                a calculation crashes) shall be sent. E.g. 'name@dummy.lol'.
+                Mail will have the prefix '[Slurm-Assassin]' and the sender
+                address noreply@assassin.vsc.info.
         """
 
         # store timeout and polling period in seconds 
@@ -60,6 +67,11 @@ class SlurmAssassin(object):
 
         # name of the file the assassin logs to
         self.log_file = log_file
+
+        # mail address to which notifications should be sent
+        self.email_recipient = email
+        self.email_sender = "noreply@assassin.vsc.info"
+        self.email_subject_prefix = "[Slurm-Assassin] "
 
         # start time of job
         self.time_calculation_start = self.time_now()
@@ -85,6 +97,14 @@ class SlurmAssassin(object):
         return os.environ["SLURM_JOB_ID"]
 
     @staticmethod
+    def get_job_name():
+        """Get the jobname of current slurm job if available"""
+        try:
+            return os.environ["SLURM_JOB_NAME"]
+        except KeyError:
+            return "Unknown"
+
+    @staticmethod
     def time_last_modified(file):
         return os.stat(file).st_mtime
 
@@ -107,7 +127,7 @@ class SlurmAssassin(object):
         
         level should be bettween 0 and 3:
             - 0 ordinary info
-            - 1 important infor
+            - 1 important info
             - 2 warning
             - 3 error
         """
@@ -131,8 +151,66 @@ class SlurmAssassin(object):
                 marker + timestamp + ": " + msg + os.linesep
             )
 
+    def send_email(self, subject, message):
+        """Send an email notification to user. Sender will always be
+        noreply@assassin.vsc.info. The subject will always be prefixed
+        with '[Slurm-Assassin]'"""
+        msg = EmailMessage()
+        msg.set_content(message)
+        msg['From'] = self.email_sender
+        msg['To'] = self.email_recipient
+        msg['Subject'] = self.email_subject_prefix + subject
+
+        self.log("Sending mail to " + self.email_recipient + ": " + subject)
+
+        with smtplib.SMTP('localhost') as s:
+            s.send_message(msg)
+
+
+    def send_email_notifcation_crashed(self):
+        """If the user specified a notification email address, 
+        send a notification mail that the job crashed."""
+
+        if not self.email_recipient is None:
+            msg = "Dear VSC3 user, " + os.linesep
+            msg += "your calculation '" +  self.get_job_name() + \
+                        "' has crashed. The corresponding job '" + \
+                            self.get_job_id() + "' was thus cancelled." + \
+                                os.linesep
+            msg += os.linesep + "Best Regards," + os.linesep
+            msg += "Your favorite Slurm-Assassin"
+
+
+            self.send_email(
+                subject="Calculation Crashed",
+                message=msg
+            )
+
+    def send_email_notifcation_timeout(self):
+        """If the user specified a notification email address, 
+        send a notification mail that the job timed out."""
+
+        if not self.email_recipient is None:
+            msg = "Dear VSC3 user, " + os.linesep
+            msg += "your calculation '" +  self.get_job_name() + \
+                        "' has timed out, because the was no update in any " + \
+                            "of the outfiles for " + str(self.timeout / 60.0) + \
+                                " minutes. The corresponding job '" + \
+                                    self.get_job_id() + \
+                                        "' was thus cancelled." + os.linesep
+            msg += os.linesep + "Best Regards," + os.linesep
+            msg += "Your favorite Slurm-Assassin"
+
+
+            self.send_email(
+                subject="Calculation Crashed",
+                message=msg
+            )
+
 
     def is_timeout_reached(self):
+        """Checks the outfile(s) for changes. Returns whether there 
+        the time that passed since the last change exceeds the timeout."""
 
         timeout_reached = False
 
@@ -166,10 +244,14 @@ class SlurmAssassin(object):
         return is_finished
 
     def is_calculation_crashed(self):
+        """Checks if there is an error message in the error file, that would 
+        justify killing the job"""
+
         #raise NotImplementedError("TODO: parse error file for common errors")
         return False
 
     def kill_job(self):
+        """Cancels the current job via Slurm's scancel."""
 
         job_id = self.get_job_id()
 
@@ -178,7 +260,27 @@ class SlurmAssassin(object):
         # cancell the slurm job the assassin is running in.
         sp.run(["scancel", job_id]) 
 
+
     def lurk_and_kill(self):
+        """Activates a listener that checks whether the calculation started via
+        the start_calculation method is still alive. If it has died the 
+        assassin will kill the slurm job (and notify the user if a mail
+        address was specified in the constructor)
+        
+        A calculation will be regarded finished if:
+         - The child process containing the calculation terminates with return 
+           code 0.
+         - The output file contains the line "Have a nice day". This may be
+           altered using the attribute 'end_of_calculation_string'
+
+        A calculation will be regarded crashed/undead/a zombie if:
+         - The child process containing the calculation terminates with a return
+           code other than 0.
+         - The outfile(s) are not updated for longer than the specified 
+           timeout period (set in constructor).
+         - A specific keyword is found in the error file (yet to be 
+           implemented).
+        """
 
         #--- keep listening if calculation is still sane ---
         time_last_poll = self.time_calculation_start
@@ -188,9 +290,6 @@ class SlurmAssassin(object):
                 
                 time.sleep(self.polling_period_process_handle)
                 
-                print("Assin: loop")
-
-
                 #--- check process handle if calculation has ended ---
                 # check process handle 
                 return_code = self.calculation_process.poll()
@@ -210,8 +309,6 @@ class SlurmAssassin(object):
                             "Calculation finished with return code " + \
                                 str(return_code) + "."
                         )
-
-                print(return_code)
                 #---
 
 
@@ -258,10 +355,13 @@ class SlurmAssassin(object):
         except CalculationCrashed as ex:
             
             self.log("Calculation crashed!", 3)
+            self.send_email_notifcation_crashed()
+
 
         except CalculationTimeout as ex:
 
             self.log("Calculation timed out!", 3)
+            self.send_email_notifcation_timeout()
 
             # stop the calculation process.
             try:
@@ -275,19 +375,6 @@ class SlurmAssassin(object):
         #---
 
 
-def main():
-
-    assassin = Assassin(
-        timeout=0.5, 
-        polling_period=10/60, 
-        out_file_name="dummy_process.out"
-    )
-    assassin.polling_period_process_handle = 5
-    assassin.start_calculation_process(["python", "dummy_process.py"])
-    assassin.lurk_and_kill()
-
-if __name__ == '__main__':
-    main()
 
 
         
