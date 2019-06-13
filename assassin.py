@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """This module contains a class that can monitor an aims calculations on the 
 VSC and kill them it no progress is made.
 
