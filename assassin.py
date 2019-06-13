@@ -1,5 +1,13 @@
-"""This script will monitor aims calculations on the VSC and kill them if no 
-progress is made.
+"""This module contains a class that can monitor an aims calculations on the 
+VSC and kill them it no progress is made.
+
+When executed as a script, the assassin will assume the start command to be 
+"mpirun aims.x" and also assume the names of the output files as given 
+by the default arguments of the assassin's constructor. Email notifications
+are disabled by default as well.
+
+Author:
+    - Johannes Cartus, TU Graz, 07.06.2019
 """
 
 import subprocess as sp
@@ -255,7 +263,7 @@ class SlurmAssassin(object):
 
         job_id = self.get_job_id()
 
-        self.log("Killing job " + str(job_id))
+        self.log("Killing job " + str(job_id), 1)
 
         # cancell the slurm job the assassin is running in.
         sp.run(["scancel", job_id]) 
@@ -374,6 +382,15 @@ class SlurmAssassin(object):
             self.kill_job()
         #---
 
+
+def main():
+    assassin = SlurmAssassin()
+    assassin.start_calculation_process()
+    assassin.lurk_and_kill()
+
+
+if __name__ == '__main__':
+    main()
 
 
 
