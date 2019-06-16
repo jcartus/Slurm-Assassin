@@ -12,12 +12,13 @@ Author:
 """
 
 import subprocess as sp
-import os
+import os, sys
 from datetime import datetime
 import time
 import smtplib
 from email.message import EmailMessage
 
+import argparse
 
 class DeadCalculation(RuntimeError):
     pass
@@ -64,15 +65,20 @@ class SlurmAssassin(object):
         # store timeout and polling period in seconds 
         self.timeout = timeout * 60
 
-        # interval in which outfiles are checked in seconds
+        # period in which outfiles are checked in seconds
         self.polling_period_outfiles = polling_period * 60
 
-        # intervall in which calculation process is checked in seconds
-        self.polling_period_process_handle = 60
+        # period in which calculation process is checked in seconds
+        self.polling_period_process_handle = 30
 
-        # note names of out and error file
-        self.out_file_name = out_file_name
+        #--- note names of out and error file ---
+        try:
+            self.out_file_name = list(out_file_name)
+        except TypeError:
+            self.out_file_name = [out_file_name]
+
         self.err_file_name = err_file_name
+        #---
 
         # name of the file the assassin logs to
         self.log_file = log_file
@@ -100,10 +106,13 @@ class SlurmAssassin(object):
         """Current time in s"""
         return datetime.now().timestamp()
 
-    @staticmethod
-    def get_job_id():
+    def get_job_id(self):
         """Get the id of current slurm job as string"""
-        return os.environ["SLURM_JOB_ID"]
+        try:    
+            return os.environ["SLURM_JOB_ID"]
+        except Exception as ex:
+            self.send_email_notification_assassin_error(ex)
+            raise ex
 
     @staticmethod
     def get_job_name():
@@ -113,9 +122,23 @@ class SlurmAssassin(object):
         except KeyError:
             return "Unknown"
 
-    @staticmethod
-    def time_last_modified(file):
-        return os.stat(file).st_mtime
+    def time_last_modified(self, file):
+        """Gets the time of last modification (in seconds since ??)"""
+
+        try: 
+            return os.stat(file).st_mtime
+
+        except FileNotFoundError:
+            
+            # if the missing file was the main file, we have a problem!
+            if file == self.out_file_name[0]:
+                msg = "Main outfile " + file + " not found!"
+                self.log(msg, 3)
+                raise CalculationCrashed(msg)
+
+            else:
+                self.log("Outfile " + file + " not found!", 2)
+                return 0
 
     def start_calculation_process(self, command=["mpirun", "aims.x"], *args):
         """Run a subprocess executing the command to be governed by the 
@@ -175,8 +198,32 @@ class SlurmAssassin(object):
         with smtplib.SMTP('localhost') as s:
             s.send_message(msg)
 
+    def send_email_notification_assassin_error(self, exception=None):
+        """Used to send to user an error warning, in case e.g. an exception
+        that cannot be handled occurres"""
 
-    def send_email_notifcation_crashed(self):
+        if not self.email_recipient is None:
+            msg = "Dear VSC3 user, " + os.linesep
+            msg += "while tending to your calculation '" +  \
+                self.get_job_name() + "' (job id: " + self.get_job_id() + \
+                    ") an unexpected error occurred. Please manually check " + \
+                        "the situation on vsc immediately!!!"  + os.linesep
+            
+            if not exception is None:
+                msg += "The following error occurred: " + str(exception) + \
+                    os.linesep
+
+            msg += os.linesep + "Best Regards," + os.linesep
+            msg += "Your favorite Slurm-Assassin"
+
+
+            self.send_email(
+                subject="Unexpected Assassin-Error, USER ACTION REQUIRED!",
+                message=msg
+            )
+
+
+    def send_email_notification_crashed(self):
         """If the user specified a notification email address, 
         send a notification mail that the job crashed."""
 
@@ -195,7 +242,7 @@ class SlurmAssassin(object):
                 message=msg
             )
 
-    def send_email_notifcation_timeout(self):
+    def send_email_notification_timeout(self):
         """If the user specified a notification email address, 
         send a notification mail that the job timed out."""
 
@@ -223,7 +270,11 @@ class SlurmAssassin(object):
 
         timeout_reached = False
 
-        modification_time = self.time_last_modified(self.out_file_name)
+        #--- find time of most recent file change ---
+        modification_time = max(
+            [ self.time_last_modified(f) for f in self.out_file_name]
+        )
+        #---
 
         # if there was a modification, store new modification time
         if modification_time > self.time_last_update_out:
@@ -244,12 +295,20 @@ class SlurmAssassin(object):
 
         is_finished = False
 
-        with open(self.out_file_name, "r") as f:
-            for line in f: # TODO avoid re-reading the whole outfile, maybe used read in chunk by chunk
-                if self.end_of_calculation_string in line:
-                    is_finished = True
-                    break
-        
+
+        try:
+            with open(self.out_file_name[0], "r") as f:
+                for line in f: # TODO avoid re-reading the whole outfile, maybe used read in chunk by chunk
+                    if self.end_of_calculation_string in line:
+                        is_finished = True
+                        break
+
+        except FileNotFoundError:
+            msg = "Main outfile " + self.out_file_name[0] + " not found!"
+            self.log(msg, 3)
+            raise CalculationCrashed(msg)
+
+
         return is_finished
 
     def is_calculation_crashed(self):
@@ -323,11 +382,10 @@ class SlurmAssassin(object):
 
                 #--- Handle file polling ---
 
-
                 # check file polling interval. 
                 if abs(time_last_poll - self.time_now()) < \
                     self.polling_period_outfiles:
-
+                    
                     self.log("Polling outfiles.")
 
                     #--- check outfiles---
@@ -361,38 +419,144 @@ class SlurmAssassin(object):
                     time_last_poll = self.time_now()
                 #---
 
+            self.log("Calculation finished normally", 1)
+
         except CalculationCrashed as ex:
             
             self.log("Calculation crashed!" + str(ex), 3)
-            self.send_email_notifcation_crashed()
+            self.send_email_notification_crashed()
+
+            self.kill_job()
 
 
         except CalculationTimeout as ex:
 
             self.log("Calculation timed out!" + str(ex), 3)
-            self.send_email_notifcation_timeout()
+            self.send_email_notification_timeout()
 
             # stop the calculation process.
             try:
                 self.terminate_calculation_process()
-            except:
+            except Exception as ex:
                 self.log("Could not stop calculation process!", 3)
+                self.send_email_notification_assassin_error(ex)
+            
+            self.kill_job()
+
+        except Exception as ex:
+            
+            self.log("An unexpected error occurred: " + str(ex))
+            self.send_email_notification_assassin_error(ex)
+
+            self.kill_job()
 
         finally:
             
-            self.kill_job()
+            # end whichever python program the assassin was run in.
+            sys.exit()
         #---
 
 
-def main():
-    assassin = SlurmAssassin()
-    assassin.start_calculation_process()
+
+def main(args):
+    assassin = SlurmAssassin(
+        timeout=args.timeout,
+        polling_period=args.polling_period,
+        out_file_name=args.outfiles,
+        email=args.email
+    )
+
+    if isinstance(args.command, list):
+        command = args.command
+    else: 
+        command = args.command.split()
+    assassin.start_calculation_process(command=command)
+
     assassin.lurk_and_kill()
 
 
 if __name__ == '__main__':
-    main()
 
+    parser = argparse.ArgumentParser(
+        prog="assassin.py",
+        description= \
+"""If you want to do calculations on VSC and feel like you should
+check on the from time to time, than the assassin is for you!
+It runs a command of your choice (see below), checks
+periodically whether its still running and kills the calculation
+if it runs into any trouble. If you specify a mail address you 
+will also get notified.
+""",
+        epilog="Have fun on vsc,\nyour favorite Slurm-Assassin"
+    )
 
+    parser.add_argument(
+        '-c', '--command',
+        nargs='+',
+        default=["mpirun", "aims.x"],
+        help="The command you want to run. Example (and default) mpirun aims.x",
+        metavar='cmd',
+        type=str,
+        required=False,
+        dest="command"
+    )
 
-        
+    
+    parser.add_argument(
+        '-e', '--email',
+        help="An email address the assassin may send notifications to " + \
+            "(e.g. in case the calculation dies and is cancelled).",
+        metavar="your@mail.address",
+        #required=False,
+        type=str,
+        default=None,
+        dest="email",
+    )
+
+    parser.add_argument(
+        '-o', '--out-files',
+        help=\
+"""Files produced by the calculation started by the specified command, from which 
+the assassin may infer that the calculation is still running as long as they 
+keep being updated. You may specify multiple files, e.g. in case a cube file 
+or something similar is generated during the calculation. In this case any 
+change in ANY of the file will surfice for the calculation not to be killed.
+The first output file in the list (if more than one are specified) should be 
+the main output file.
+It must always be produced. If the (first) output 
+file is not found, the assassin will assume the calculation to be crashed and 
+kill the job. The first/main output file will also be checked for phrases that 
+indicate the calculation to be finished (E.g. 'Have a nice day')""",
+        default="aims.out",
+        type=str,
+        nargs="+",
+        required=False,
+        dest="outfiles"
+    )
+
+    parser.add_argument(
+        '-p', '--polling',
+        help="The polling period, i.e. the time period in which the out " + \
+            "files are checked for changes, in minutes. Default is 5 min.",
+        default=5,
+        type=float,
+        required=False,
+        dest="polling_period"
+    )
+
+    parser.add_argument(
+        '-T', '--time-out',
+        help="The time-out time in minuted." + \
+            "If none of the specified outfiles show any change for longer" + \
+                " than the timeout period the assassin will kill the " + \
+                    "slurm-job. The default is 15 min.",
+        default=15,
+        type=float,
+        required=False,
+        dest="timeout"
+    )
+    
+    
+    args = parser.parse_args()
+    main(args)
+       
