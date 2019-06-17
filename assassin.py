@@ -383,7 +383,7 @@ class SlurmAssassin(object):
                 #--- Handle file polling ---
 
                 # check file polling interval. 
-                if abs(time_last_poll - self.time_now()) < \
+                if abs(time_last_poll - self.time_now()) > \
                     self.polling_period_outfiles:
                     
                     self.log("Polling outfiles.")
