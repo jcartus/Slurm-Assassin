@@ -88,29 +88,30 @@ class EMailHandler(object):
 
         self.sender_address = sender_address
         self.recipient_address = recipient_address
-        self.subject_prefix = subject_prefix
+        self.subject_prefix = "" if subject_prefix is None else subject_prefix
 
         # if no logger is specified use the default
-        self._logger = _default_logger if logger is None else logger
+        self._logger = self._default_logger if logger is None else logger
             
-    def _log(msg, level=0):
+    def _log(self, msg, level=0):
         self._logger.log(msg=msg, level=level)
 
     def send_email(self, subject, message):
-        """Send an email notification to user. Sender will always be
-        noreply@assassin.vsc.info. The subject will always be prefixed
-        with '[Slurm-Assassin]'"""
+        """Send an email notification to user."""
         msg = EmailMessage()
         msg.set_content(message)
         msg['From'] = self.sender_address
         msg['To'] = self.recipient_address
         msg['Subject'] = self.subject_prefix + subject
 
-        self.log("Sending mail to " + self.._email_handler + ": " + subject)
+        self._log("Sending mail to " + self.recipient_address + ": " + subject)
 
-        with smtplib.SMTP('localhost') as s:
-            s.send_message(msg)
-
+        #with smtplib.SMTP('localhost') as s:
+        #    s.send_message(msg)        
+        s = smtplib.SMTP('localhost')
+        #s.set_debuglevel(1)
+        s.send_message(msg)
+        s.quit()
     
 
 class SlurmAssassin(object):
@@ -387,12 +388,85 @@ class SlurmAssassin(object):
         # cancell the slurm job the assassin is running in.
         sp.run(["scancel", job_id]) 
 
+    def _lurk(self):
+        """This function encapsulates the monitoring process. It is used 
+        by lurk an kill and only a separate function for testing reasons."""
+
+        time_last_poll = self.time_calculation_start
+
+        while True:
+            
+            time.sleep(self.polling_period_process_handle)
+            
+            #--- check process handle if calculation has ended ---
+            # check process handle 
+            return_code = self.calculation_process.poll()
+            
+            # calculation process has terminated :D
+            if not return_code is None:
+                
+                # calculation exited normally
+                if return_code == 0:
+                    
+                    self.log("Calculation finished (by process handle).", 1)
+                    break # quit the while-loop
+                
+                # there was an error
+                else:
+                    raise CalculationCrashed(
+                        "Calculation finished with return code " + \
+                            str(return_code) + "."
+                    )
+            #---
+
+
+            #--- Handle file polling ---
+
+            # check file polling interval. 
+            if abs(time_last_poll - self.time_now()) > \
+                self.polling_period_outfiles:
+                
+                self.log("Polling outfiles.")
+
+                #--- check outfiles---
+                if self.is_calculation_finished():
+                    
+                    self.log("Calculation finished (by outfile).", 1)
+                    break # quit the while-loop, calculation was successful
+
+                elif self.is_calculation_crashed():
+                    
+                    raise CalculationCrashed(
+                        "Calculation crash was detected via error file."
+                    )
+
+                else:
+                    
+                    self.log("Outfiles are ok.")
+
+                    # if nothing meaningful was found in outfiles, 
+                    # see if timeout is reached
+                    if self.is_timeout_reached():
+
+                        raise CalculationTimeout(
+                            "Timeout of {0} minutes was exceeded.".format(
+                                self.timeout / 60.0
+                            )
+                        )
+                #---
+
+                # update last poll time
+                time_last_poll = self.time_now()
+            #---
+
+        self.log("Calculation finished normally", 1)
 
     def lurk_and_kill(self):
         """Activates a listener that checks whether the calculation started via
         the start_calculation method is still alive. If it has died the 
         assassin will kill the slurm job (and notify the user if a mail
-        address was specified in the constructor)
+        address was specified in the constructor). At the end (when 
+        calculation finished or was killed) python will be ended via sys.exit.
         
         A calculation will be regarded finished if:
          - The child process containing the calculation terminates with return 
@@ -409,76 +483,10 @@ class SlurmAssassin(object):
            implemented).
         """
 
-        #--- keep listening if calculation is still sane ---
-        time_last_poll = self.time_calculation_start
-
         try:
-            while True:
-                
-                time.sleep(self.polling_period_process_handle)
-                
-                #--- check process handle if calculation has ended ---
-                # check process handle 
-                return_code = self.calculation_process.poll()
-                
-                # calculation process has terminated :D
-                if not return_code is None:
-                    
-                    # calculation exited normally
-                    if return_code == 0:
-                        
-                        self.log("Calculation finished (by process handle).", 1)
-                        break # quit the while-loop
-                    
-                    # there was an error
-                    else:
-                        raise CalculationCrashed(
-                            "Calculation finished with return code " + \
-                                str(return_code) + "."
-                        )
-                #---
-
-
-                #--- Handle file polling ---
-
-                # check file polling interval. 
-                if abs(time_last_poll - self.time_now()) > \
-                    self.polling_period_outfiles:
-                    
-                    self.log("Polling outfiles.")
-
-                    #--- check outfiles---
-                    if self.is_calculation_finished():
-                        
-                        self.log("Calculation finished (by outfile).", 1)
-                        break # quit the while-loop, calculation was successful
-
-                    elif self.is_calculation_crashed():
-                        
-                        raise CalculationCrashed(
-                            "Calculation crash was detected via error file."
-                        )
-
-                    else:
-                        
-                        self.log("Outfiles are ok.")
-
-                        # if nothing meaningful was found in outfiles, 
-                        # see if timeout is reached
-                        if self.is_timeout_reached():
-
-                            raise CalculationTimeout(
-                                "Timeout of {0} minutes was exceeded.".format(
-                                    self.timeout / 60.0
-                                )
-                            )
-                    #---
-
-                    # update last poll time
-                    time_last_poll = self.time_now()
-                #---
-
-            self.log("Calculation finished normally", 1)
+            
+            #keep listening if calculation is still sane
+            self._lurk()
 
         except CalculationCrashed as ex:
             
@@ -513,7 +521,6 @@ class SlurmAssassin(object):
             
             # end whichever python program the assassin was run in.
             sys.exit()
-        #---
 
 
 
