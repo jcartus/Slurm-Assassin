@@ -6,13 +6,15 @@ Author: Johannes Cartus, TU Graz, 04.07.2019
 
 import time
 import numpy as np
+
 from assassin import Logger
+
 
 def main():
 
     Logger.log("Dummy Process (Raise Exception): started")
 
-    wating_time = np.random.rand() * 60
+    wating_time = np.random.rand() * 20
     Logger.log("Dummy Process (Raise Exception):" + \
         " Waiting time is {0} seconds".format(wating_time))
 

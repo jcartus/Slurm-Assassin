@@ -152,9 +152,9 @@ class SlurmAssassin(object):
         self.polling_period_process_handle = 30
 
         #--- note names of out and error file ---
-        try:
-            self.out_file_name = list(out_file_name)
-        except TypeError:
+        if isinstance(out_file_name, list):
+            self.out_file_name = out_file_name
+        else:
             self.out_file_name = [out_file_name]
 
         self.err_file_name = err_file_name
@@ -222,12 +222,16 @@ class SlurmAssassin(object):
                 self.log("Outfile " + file + " not found!", 2)
                 return 0
 
-    def start_calculation_process(self, command=["mpirun", "aims.x"], *args):
+    def start_calculation_process(self, 
+        command=["mpirun", "aims.x"], 
+        *args, 
+        **kwargs
+    ):
         """Run a subprocess executing the command to be governed by the 
         assassin. This will probably be the aims calculation."""
         
         self.log("Running command: " + " ".join(command), 1)
-        self.calculation_process = sp.Popen(command, *args)
+        self.calculation_process = sp.Popen(command, *args, **kwargs)
 
     def terminate_calculation_process(self):
         """Stop the goverened subprocess."""
@@ -348,7 +352,6 @@ class SlurmAssassin(object):
 
         is_finished = False
 
-
         try:
             with open(self.out_file_name[0], "r") as f:
                 for line in f: # TODO avoid re-reading the whole outfile, maybe used read in chunk by chunk
@@ -357,11 +360,7 @@ class SlurmAssassin(object):
                         break
 
         except FileNotFoundError:
-            if isinstance(self.out_file_name, list):
-                msg = "Main outfile " + self.out_file_name[0] + " not found!"
-            else:
-                msg = "Main outfile " + self.out_file_name + " not found!"
-
+            msg = "Main outfile " + self.out_file_name[0] + " not found!"
             self.log(msg, 3)
             raise CalculationCrashed(msg)
 

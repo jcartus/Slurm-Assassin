@@ -4,6 +4,7 @@ Author: Johannes Cartus, TU Graz, 04.07.2019
 """
 import numpy as np
 import unittest
+import os
 
 from collections import defaultdict
 
@@ -58,6 +59,14 @@ SlurmAssassin._logger = LoggerMock
 
 class TestCodeFailuresAreRecognized(unittest.TestCase):
 
+    def setUp(self):
+
+        self.fnull = open(os.devnull, "w")
+
+    def tearDown(self):
+        
+        self.fnull.close()
+
     def test_calculation_raises_exception(self):
         
         LoggerMock.reset_counter()
@@ -68,15 +77,46 @@ class TestCodeFailuresAreRecognized(unittest.TestCase):
         )
 
         assassin.start_calculation_process(
-            ["python3", "utilities/dummy_raises_exception.py"]
+            ["python3", "utilities/dummy_raises_exception.py"],
+            stdout=self.fnull,
+            stderr=self.fnull
         )
 
         # should detect the broken calculation by raising an exception
-        self.assertRaises(RuntimeError, assassin._lurk)
+        self.assertRaises(CalculationCrashed, assassin._lurk)
 
             
         LoggerMock.assert_expected_counts_errors(0)
 
+    def test_calculation_stops_writing(self):
+
+
+        LoggerMock.reset_counter()
+
+
+        logfile = "dummy_stop_writing.log"
+
+        assassin = SlurmAssassin(
+            timeout=20 / 60, 
+            polling_period=7 / 60,
+            out_file_name=logfile
+        )
+
+        assassin.start_calculation_process(
+            [
+                "python3", 
+                "utilities/dummy_stops_writing_output.py", 
+                "-o logfile"
+            ],
+            stdout=self.fnull,
+            stderr=self.fnull
+        )
+
+        # should detect the broken calculation by raising an exception
+        self.assertRaises(CalculationTimeout, assassin._lurk)
+
+            
+        LoggerMock.assert_expected_counts_errors(0)
 
 
 if __name__ == '__main__':
