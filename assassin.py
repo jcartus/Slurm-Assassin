@@ -29,16 +29,99 @@ class CalculationTimeout(DeadCalculation):
 class CalculationCrashed(DeadCalculation):
     pass 
 
+class Logger(object):
+    """This class handles the logging (writes log messages to a log file)"""
 
+    name_of_logfile = "assassin.log"
+
+    # log message prefix that help identify the gravity of the log
+    _markers = [
+        "[ ] ",
+        "[#] ",
+        "[w] ",
+        "[X] "
+    ]
+    
+    @classmethod
+    def log(cls, msg, level=0):
+        """Write message to log file. There are several levels available 
+        to distinct between more or less important log messages:
+        
+        level should be bettween 0 and 3:
+            - 0 ordinary info
+            - 1 important info
+            - 2 warning
+            - 3 error
+        """
+
+        timestamp = datetime.now().strftime("%Y-%m-%d, %H:%M:%S")
+
+        try:
+            marker = cls._markers[level]
+        except IndexError:
+            raise ValueError("Unknown error level: " + str(level))
+
+        
+        with open(cls.name_of_logfile, "a") as f:
+            f.write(
+                marker + timestamp + ": " + msg + os.linesep
+            )
+
+class EMailHandler(object):
+    """This class serves as an interface from the assassin to mailing.
+    
+    Attributes:
+     - sender_address: the addres that will be listed as sender for mails sent.
+     - recipient_address: the mail address the mail should be sent to.
+     - subject_prefix: a string that is added at the front of the subject line
+       to help the receiver to identify the purpose of the mail.
+    """
+
+    _default_logger = Logger
+
+    def __init__(self, 
+        sender_address, 
+        recipient_address,
+        subject_prefix=None,
+        logger=None
+    ):
+
+        self.sender_address = sender_address
+        self.recipient_address = recipient_address
+        self.subject_prefix = subject_prefix
+
+        # if no logger is specified use the default
+        self._logger = _default_logger if logger is None else logger
+            
+    def _log(msg, level=0):
+        self._logger.log(msg=msg, level=level)
+
+    def send_email(self, subject, message):
+        """Send an email notification to user. Sender will always be
+        noreply@assassin.vsc.info. The subject will always be prefixed
+        with '[Slurm-Assassin]'"""
+        msg = EmailMessage()
+        msg.set_content(message)
+        msg['From'] = self.sender_address
+        msg['To'] = self.recipient_address
+        msg['Subject'] = self.subject_prefix + subject
+
+        self.log("Sending mail to " + self.._email_handler + ": " + subject)
+
+        with smtplib.SMTP('localhost') as s:
+            s.send_message(msg)
+
+    
 
 class SlurmAssassin(object):
+
+    _logger = Logger
 
     def __init__(self, 
         timeout=15,
         polling_period=5,
         out_file_name="aims.out",
         err_file_name="aims.err",
-        log_file="assassin.log",
         email=None
     ):
         """Args:
@@ -55,7 +138,6 @@ class SlurmAssassin(object):
                 file will be periodically checked for vsc error messages. 
                 If critical messages are found, the calculation is aborted 
                 (even is time out is not reached yet).
-            log_file: Name of the file the assassin will write log messages to.
             email: The email address, that potential notifications (e.g. if
                 a calculation crashes) shall be sent. E.g. 'name@dummy.lol'.
                 Mail will have the prefix '[Slurm-Assassin]' and the sender
@@ -80,13 +162,15 @@ class SlurmAssassin(object):
         self.err_file_name = err_file_name
         #---
 
-        # name of the file the assassin logs to
-        self.log_file = log_file
-
         # mail address to which notifications should be sent
-        self.email_recipient = email
-        self.email_sender = "noreply@assassin.vsc.info"
-        self.email_subject_prefix = "[Slurm-Assassin] "
+        if not email is None:
+            self._email_handler = EMailHandler(
+                sender_address="noreply@assassin.vsc.info",
+                recipient_address=email,
+                subject_prefix="[Slurm-Assassin] "
+            )
+        else:
+            self._email_handler = None
 
         # start time of job
         self.time_calculation_start = self.time_now()
@@ -164,45 +248,16 @@ class SlurmAssassin(object):
             - 3 error
         """
 
-        timestamp = datetime.now().strftime("%Y-%m-%d, %H:%M:%S")
-
-        if level == 0:
-            marker = "[ ] "
-        elif level == 1:
-            marker = "[#] "
-        elif level == 2:
-            marker = "[w] "
-        elif level == 3:
-            marker = "[X] "
-        else:
-            raise ValueError("Unknown error level: " + str(level))
-
-        
-        with open(self.log_file, "a") as f:
-            f.write(
-                marker + timestamp + ": " + msg + os.linesep
-            )
+        self._logger.log(msg=msg, level=level)
 
     def send_email(self, subject, message):
-        """Send an email notification to user. Sender will always be
-        noreply@assassin.vsc.info. The subject will always be prefixed
-        with '[Slurm-Assassin]'"""
-        msg = EmailMessage()
-        msg.set_content(message)
-        msg['From'] = self.email_sender
-        msg['To'] = self.email_recipient
-        msg['Subject'] = self.email_subject_prefix + subject
-
-        self.log("Sending mail to " + self.email_recipient + ": " + subject)
-
-        with smtplib.SMTP('localhost') as s:
-            s.send_message(msg)
+        self._email_handler.send_email(subject=subject, message=message)
 
     def send_email_notification_assassin_error(self, exception=None):
         """Used to send to user an error warning, in case e.g. an exception
         that cannot be handled occurres"""
 
-        if not self.email_recipient is None:
+        if not self._email_handler is None:
             msg = "Dear VSC3 user, " + os.linesep
             msg += "while tending to your calculation '" +  \
                 self.get_job_name() + "' (job id: " + self.get_job_id() + \
@@ -227,7 +282,7 @@ class SlurmAssassin(object):
         """If the user specified a notification email address, 
         send a notification mail that the job crashed."""
 
-        if not self.email_recipient is None:
+        if not self._email_handler is None:
             msg = "Dear VSC3 user, " + os.linesep
             msg += "your calculation '" +  self.get_job_name() + \
                         "' has crashed. The corresponding job '" + \
@@ -246,7 +301,7 @@ class SlurmAssassin(object):
         """If the user specified a notification email address, 
         send a notification mail that the job timed out."""
 
-        if not self.email_recipient is None:
+        if not self._email_handler is None:
             msg = "Dear VSC3 user, " + os.linesep
             msg += "your calculation '" +  self.get_job_name() + \
                         "' has timed out, because the was no update in any " + \
