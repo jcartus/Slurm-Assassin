@@ -304,7 +304,11 @@ class SlurmAssassin(object):
                         break
 
         except FileNotFoundError:
-            msg = "Main outfile " + self.out_file_name[0] + " not found!"
+            if isinstance(self.out_file_name, list):
+                msg = "Main outfile " + self.out_file_name[0] + " not found!"
+            else:
+                msg = "Main outfile " + self.out_file_name + " not found!"
+
             self.log(msg, 3)
             raise CalculationCrashed(msg)
 
@@ -483,7 +487,7 @@ if __name__ == '__main__':
 """If you want to do calculations on VSC and feel like you should
 check on the from time to time, than the assassin is for you!
 It runs a command of your choice (see below), checks
-periodically whether its still running and kills the calculation
+periodically whether it is still running and kills the calculation
 if it runs into any trouble. If you specify a mail address you 
 will also get notified.
 """,
@@ -494,7 +498,8 @@ will also get notified.
         '-c', '--command',
         nargs='+',
         default=["mpirun", "aims.x"],
-        help="The command you want to run. Example (and default) mpirun aims.x",
+        help= \
+            "The command you want to run. Example (and default) mpirun aims.x.",
         metavar='cmd',
         type=str,
         required=False,
@@ -516,17 +521,18 @@ will also get notified.
     parser.add_argument(
         '-o', '--out-files',
         help=\
-"""Files produced by the calculation started by the specified command, from which 
+"""A (list of) file(s) produced by the calculation started by the specified 
+command, from which 
 the assassin may infer that the calculation is still running as long as they 
 keep being updated. You may specify multiple files, e.g. in case a cube file 
 or something similar is generated during the calculation. In this case any 
-change in ANY of the file will surfice for the calculation not to be killed.
+change in ANY of the files will surfice for the calculation not to be killed.
 The first output file in the list (if more than one are specified) should be 
 the main output file.
 It must always be produced. If the (first) output 
-file is not found, the assassin will assume the calculation to be crashed and 
+file is not found the assassin will assume the calculation to be crashed and 
 kill the job. The first/main output file will also be checked for phrases that 
-indicate the calculation to be finished (E.g. 'Have a nice day')""",
+indicate the calculation to be finished (E.g. 'Have a nice day').""",
         default="aims.out",
         type=str,
         nargs="+",
@@ -546,8 +552,8 @@ indicate the calculation to be finished (E.g. 'Have a nice day')""",
 
     parser.add_argument(
         '-T', '--time-out',
-        help="The time-out time in minuted." + \
-            "If none of the specified outfiles show any change for longer" + \
+        help="The time-out time in minuted. " + \
+            "If none of the specified outfiles shows any change for longer" + \
                 " than the timeout period the assassin will kill the " + \
                     "slurm-job. The default is 15 min.",
         default=15,
