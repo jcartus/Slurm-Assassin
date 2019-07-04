@@ -105,11 +105,8 @@ class EMailHandler(object):
         msg['Subject'] = self.subject_prefix + subject
 
         self._log("Sending mail to " + self.recipient_address + ": " + subject)
-
-        #with smtplib.SMTP('localhost') as s:
-        #    s.send_message(msg)        
+       
         s = smtplib.SMTP('localhost')
-        #s.set_debuglevel(1)
         s.send_message(msg)
         s.quit()
     
