@@ -518,6 +518,52 @@ class SlurmAssassin(object):
             # end whichever python program the assassin was run in.
             sys.exit()
 
+    def lurk_and_notify(self):
+        """TODO: comment
+        
+        The idea is to continue lurkig until the process finishes and 
+        to never kill the slurm job. 
+        Therefore we need a distinction between crashed via error file 
+        or via process handle return code.
+        """
+
+        while True:
+            try:
+                
+                #keep listening if calculation is still sane
+                self._lurk()
+
+                break
+
+            except CalculationCrashed as ex:
+                
+                self.log("Calculation crashed!" + str(ex), 3)
+                self.send_email_notification_crashed()
+                
+                # TODO how to make sure this is only if process finished with error
+                # Probably should implement 2 abgeleitete CalculationCrashed error klassen
+                # One of them only to be thrown if processess finished with erorr code
+
+                
+
+                break
+
+
+            except CalculationTimeout as ex:
+
+                self.log("Calculation timed out!" + str(ex), 3)
+                self.send_email_notification_timeout()
+                self.log("Continue lurking.")
+
+            except Exception as ex:
+                
+                self.log("An unexpected error occurred: " + str(ex))
+                self.send_email_notification_assassin_error(ex)
+                self.log("Continue lurking.")
+
+
+        self.log("Lurk and notify ended.")
+                
 
 
 def main(args):
