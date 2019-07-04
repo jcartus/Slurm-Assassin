@@ -115,6 +115,7 @@ class TestCodeFailuresAreRecognized(unittest.TestCase):
         # should detect the broken calculation by raising an exception
         self.assertRaises(CalculationTimeout, assassin._lurk)
 
+        assassin.terminate_calculation_process()
             
         LoggerMock.assert_expected_counts_errors(0)
 
