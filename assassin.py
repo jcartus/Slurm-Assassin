@@ -27,7 +27,26 @@ class CalculationTimeout(DeadCalculation):
     pass
 
 class CalculationCrashed(DeadCalculation):
+    """Raise this if the calculation exited badly"""
     pass 
+
+class CalculationCrashFoundByProcessHandle(CalculationCrashed):
+    """This exception should be thrown if process.poll returns 
+    a return code other than 0."""
+    pass
+
+class CalculationCrashFoundByErrorFile(CalculationCrashed):
+    """Raise this if messages that suggest the calculation has crashed 
+    are found in the error file """
+    pass
+
+class CalculationCrashMainOutfileMissing(CalculationCrashed):
+    """Raise this if the main outfile is not found and the calculation this 
+    killed"""
+    pass
+
+
+
 
 class Logger(object):
     """This class handles the logging (writes log messages to a log file)"""
@@ -114,6 +133,7 @@ class EMailHandler(object):
 class SlurmAssassin(object):
 
     _logger = Logger
+    _default_email_handler = EMailHandler
 
     def __init__(self, 
         timeout=15,
@@ -149,7 +169,10 @@ class SlurmAssassin(object):
         self.polling_period_outfiles = polling_period * 60
 
         # period in which calculation process is checked in seconds
-        self.polling_period_process_handle = 30
+        self.polling_period_process_handle = min([
+            30, 
+            self.polling_period_outfiles / 10
+        ])
 
         #--- note names of out and error file ---
         if isinstance(out_file_name, list):
@@ -162,7 +185,7 @@ class SlurmAssassin(object):
 
         # mail address to which notifications should be sent
         if not email is None:
-            self._email_handler = EMailHandler(
+            self._email_handler = self._default_email_handler(
                 sender_address="noreply@assassin.vsc.info",
                 recipient_address=email,
                 subject_prefix="[Slurm-Assassin] "
@@ -178,7 +201,7 @@ class SlurmAssassin(object):
         self.time_last_update_err = self.time_calculation_start
 
         # initialize handle for aims
-        self.calculation_process = None
+        self._calculation_process = None
 
         # if this string apears in out file the calculation must be finished
         self.end_of_calculation_string = "Have a nice day"
@@ -216,7 +239,7 @@ class SlurmAssassin(object):
             if file == self.out_file_name[0]:
                 msg = "Main outfile " + file + " not found!"
                 self.log(msg, 3)
-                raise CalculationCrashed(msg)
+                raise CalculationCrashMainOutfileMissing(msg)
 
             else:
                 self.log("Outfile " + file + " not found!", 2)
@@ -231,12 +254,12 @@ class SlurmAssassin(object):
         assassin. This will probably be the aims calculation."""
         
         self.log("Running command: " + " ".join(command), 1)
-        self.calculation_process = sp.Popen(command, *args, **kwargs)
+        self._calculation_process = sp.Popen(command, *args, **kwargs)
 
     def terminate_calculation_process(self):
         """Stop the goverened subprocess."""
         self.log("Attempting to terminating child process.")
-        self.calculation_process.terminate()
+        self._calculation_process.terminate()
         self.log("Finished terminating child process.")
 
     def log(self, msg, level=0):
@@ -262,7 +285,7 @@ class SlurmAssassin(object):
         if not self._email_handler is None:
             msg = "Dear VSC3 user, " + os.linesep
             msg += "while tending to your calculation '" +  \
-                self.get_job_name() + "' (job id: " + self.get_job_id() + \
+                self.get_job_name() + "' (job id: " + str(self.get_job_id()) + \
                     ") an unexpected error occurred. Please manually check " + \
                         "the situation on vsc immediately!!!"  + os.linesep
             
@@ -280,16 +303,31 @@ class SlurmAssassin(object):
             )
 
 
-    def send_email_notification_crashed(self):
+    def send_email_notification_crashed(
+        self, 
+        exception=None, 
+        job_cancelled=True
+    ):
         """If the user specified a notification email address, 
         send a notification mail that the job crashed."""
 
         if not self._email_handler is None:
             msg = "Dear VSC3 user, " + os.linesep
             msg += "your calculation '" +  self.get_job_name() + \
-                        "' has crashed. The corresponding job '" + \
-                            self.get_job_id() + "' was thus cancelled." + \
-                                os.linesep
+                "' has crashed." 
+                        
+            if job_cancelled:
+                msg += "The corresponding job '" + \
+                        str(self.get_job_id()) + "' was thus cancelled." + \
+                            os.linesep
+            else:
+                msg += "Please check the corresponding job '" + \
+                    str(self.get_job_id()) + "'." + os.linesep
+
+            if not exception is None:
+                msg += "The following error occurred: " + str(exception) + \
+                    os.linesep
+
             msg += os.linesep + "Best Regards," + os.linesep
             msg += "Your favorite Slurm-Assassin"
 
@@ -299,7 +337,7 @@ class SlurmAssassin(object):
                 message=msg
             )
 
-    def send_email_notification_timeout(self):
+    def send_email_notification_timeout(self, job_cancelled=True):
         """If the user specified a notification email address, 
         send a notification mail that the job timed out."""
 
@@ -308,15 +346,22 @@ class SlurmAssassin(object):
             msg += "your calculation '" +  self.get_job_name() + \
                         "' has timed out, because the was no update in any " + \
                             "of the outfiles for " + str(self.timeout / 60.0) + \
-                                " minutes. The corresponding job '" + \
-                                    self.get_job_id() + \
-                                        "' was thus cancelled." + os.linesep
+                                " minutes. "
+            
+            if job_cancelled:
+                msg += "The corresponding job '" + \
+                        str(self.get_job_id()) + "' was thus cancelled." + \
+                            os.linesep
+            else:
+                msg += "Please check the corresponding job '" + \
+                    str(self.get_job_id()) + "'." + os.linesep
+
             msg += os.linesep + "Best Regards," + os.linesep
             msg += "Your favorite Slurm-Assassin"
 
 
             self.send_email(
-                subject="Calculation Crashed",
+                subject="Calculation Time Out Reached",
                 message=msg
             )
 
@@ -362,7 +407,7 @@ class SlurmAssassin(object):
         except FileNotFoundError:
             msg = "Main outfile " + self.out_file_name[0] + " not found!"
             self.log(msg, 3)
-            raise CalculationCrashed(msg)
+            raise CalculationCrashMainOutfileMissing(msg)
 
 
         return is_finished
@@ -396,7 +441,7 @@ class SlurmAssassin(object):
             
             #--- check process handle if calculation has ended ---
             # check process handle 
-            return_code = self.calculation_process.poll()
+            return_code = self._calculation_process.poll()
             
             # calculation process has terminated :D
             if not return_code is None:
@@ -409,7 +454,7 @@ class SlurmAssassin(object):
                 
                 # there was an error
                 else:
-                    raise CalculationCrashed(
+                    raise CalculationCrashFoundByProcessHandle(
                         "Calculation finished with return code " + \
                             str(return_code) + "."
                     )
@@ -432,13 +477,14 @@ class SlurmAssassin(object):
 
                 elif self.is_calculation_crashed():
                     
-                    raise CalculationCrashed(
-                        "Calculation crash was detected via error file."
+                    raise CalculationCrashFoundByErrorFile(
+                        "Calculation crash was detected via error file: " + \
+                            str(self.err_file_name)
                     )
 
                 else:
                     
-                    self.log("Outfiles are ok.")
+                    self.log("Outfiles show no crashed or finished calculation.")
 
                     # if nothing meaningful was found in outfiles, 
                     # see if timeout is reached
@@ -487,14 +533,14 @@ class SlurmAssassin(object):
         except CalculationCrashed as ex:
             
             self.log("Calculation crashed!" + str(ex), 3)
-            self.send_email_notification_crashed()
+            self.send_email_notification_crashed(exception=ex)
 
             self.kill_job()
 
 
         except CalculationTimeout as ex:
 
-            self.log("Calculation timed out!" + str(ex), 3)
+            self.log("Calculation timed out! " + str(ex), 3)
             self.send_email_notification_timeout()
 
             # stop the calculation process.
@@ -519,40 +565,58 @@ class SlurmAssassin(object):
             sys.exit()
 
     def lurk_and_notify(self):
-        """TODO: comment
+        """Activates a listener that checks whether the calculation started via
+        the start_calculation method is still alive. If it has died the 
+        assassin notify the user via email (if one was 
+        specified, otherwise it will just log). At the end (when 
+        calculation finished) python will be ended via sys.exit.
         
-        The idea is to continue lurkig until the process finishes and 
-        to never kill the slurm job. 
-        Therefore we need a distinction between crashed via error file 
-        or via process handle return code.
+        A calculation will be regarded finished if:
+         - The child process containing the calculation terminates with return 
+           code 0.
+         - The output file contains the line "Have a nice day". This may be
+           altered using the attribute 'end_of_calculation_string'
+        In any of these cases the assassin will top listening and exit.
+
+        A calculation will be regarded crashed/undead/a zombie if:
+         - The child process containing the calculation terminates with a return
+           code other than 0.
+         - The outfile(s) are not updated for longer than the specified 
+           timeout period (set in constructor).
+         - A specific keyword is found in the error file (yet to be 
+           implemented).
+        In any of these cases the assassin will notify the user via email/log.
+        NO FURTHER ACTION (i.e. like cancelling the job) IS TAKEN WHATSOEVER!
         """
 
         while True:
             try:
                 
-                #keep listening if calculation is still sane
+                # keep listening if calculation is still sane
                 self._lurk()
 
+                # lurking finishes means that the calculation process must have
+                # finished properly.
                 break
 
-            except CalculationCrashed as ex:
+            except CalculationCrashFoundByProcessHandle as ex:
                 
-                self.log("Calculation crashed!" + str(ex), 3)
-                self.send_email_notification_crashed()
+                self.log("Calculation crashed! " + str(ex), 3)
+                self.send_email_notification_crashed(ex, job_cancelled=False)
                 
-                # TODO how to make sure this is only if process finished with error
-                # Probably should implement 2 abgeleitete CalculationCrashed error klassen
-                # One of them only to be thrown if processess finished with erorr code
-
-                
-
+                # since process is finished lurkin should be finished as well
                 break
 
+            except CalculationCrashMainOutfileMissing as ex:
+
+                self.log("Calculation crashed! " + str(ex), 3)
+                self.send_email_notification_crashed(ex, job_cancelled=False)
+                self.log("Continue lurking.")
 
             except CalculationTimeout as ex:
 
-                self.log("Calculation timed out!" + str(ex), 3)
-                self.send_email_notification_timeout()
+                self.log("Calculation timed out! " + str(ex), 3)
+                self.send_email_notification_timeout(job_cancelled=False)
                 self.log("Continue lurking.")
 
             except Exception as ex:
@@ -563,7 +627,7 @@ class SlurmAssassin(object):
 
 
         self.log("Lurk and notify ended.")
-                
+        sys.exit()            
 
 
 def main(args):
