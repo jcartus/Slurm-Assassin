@@ -643,8 +643,11 @@ def main(args):
     else: 
         command = args.command.split()
     assassin.start_calculation_process(command=command)
-
-    assassin.lurk_and_kill()
+    
+    if args.notify_only:
+        assassin.lurk_and_notify()
+    else:
+        assassin.lurk_and_kill()
 
 
 if __name__ == '__main__':
@@ -728,6 +731,19 @@ indicate the calculation to be finished (E.g. 'Have a nice day').""",
         type=float,
         required=False,
         dest="timeout"
+    )
+
+    parser.add_argument(
+        '--notify-only',
+        help="If this flag is set the assassin will not kill the calculation" + \
+            "or cancel the job. Instead it will only send a notification " + \
+                "(e.g. an email if an address was given) to the user and " + \
+                    "then continue to watch the calculation.",
+        const=True,
+        default=False,
+        required=False,
+        nargs="?",
+        dest="notify_only"
     )
     
     

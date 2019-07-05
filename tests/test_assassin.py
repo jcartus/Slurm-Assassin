@@ -159,7 +159,7 @@ class TestCodeFailuresAreRecognized(unittest.TestCase):
 
         # should detect the broken calculation by raising an exception
         self.assertRaises(CalculationCrashed, assassin._lurk)
-
+        assassin.terminate_calculation_process()
             
         LoggerMock.assert_expected_counts_errors(0)
 
@@ -169,7 +169,7 @@ class TestCodeFailuresAreRecognized(unittest.TestCase):
         LoggerMock.reset_counter()
 
 
-        logfile = "dummy_stop_writing.log"
+        logfile = os.path.join(utilities_path, "dummy_stop_writing.log")
 
         assassin = SlurmAssassin(
             timeout=20 / 60, 
@@ -181,7 +181,8 @@ class TestCodeFailuresAreRecognized(unittest.TestCase):
             [
                 "python3", 
                 os.path.join(utilities_path, "dummy_stops_writing_output.py"), 
-                "-o " + logfile
+                "-o",
+                logfile
             ],
             stdout=self.fnull,
             stderr=self.fnull
@@ -235,7 +236,8 @@ class TestNotifyOnlyMode(unittest.TestCase):
             [
                 "python3", 
                 os.path.join(utilities_path, "dummy_stops_writing_output.py"), 
-                "-o " + logfile
+                "-o",
+                logfile
             ],
             stdout=self.fnull,
             stderr=self.fnull
@@ -263,7 +265,7 @@ class TestNotifyOnlyMode(unittest.TestCase):
         #---
 
         #--- check if emails / log errors were send ---
-        expected = 55
+        expected = 26
         #LoggerMock.assert_expected_counts_errors(expected * 2)
         assassin._email_handler.assert_expected_counts_error_category(
             "timeout",
