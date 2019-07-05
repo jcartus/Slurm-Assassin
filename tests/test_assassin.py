@@ -112,7 +112,7 @@ class EMailHandlerMock(EMailHandler):
 
 
 # make sure the assassin uses the mocks for logger and mailing
-#SlurmAssassin._logger = LoggerMock
+SlurmAssassin._logger = LoggerMock
 SlurmAssassin._default_email_handler = EMailHandlerMock
 
 
