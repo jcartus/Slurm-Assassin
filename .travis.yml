@@ -1,0 +1,10 @@
+
+language: python
+python:
+  - 3.6
+
+
+script: python -W ignore tests/run_all_tests.py
+
+notification:
+  email: false 
