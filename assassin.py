@@ -11,8 +11,13 @@ Author:
     - Johannes Cartus, TU Graz, 07.06.2019
 """
 
+import numpy as np
 import subprocess as sp
 import os, sys
+import glob 
+
+from functools import reduce
+
 from datetime import datetime
 import time
 import smtplib
@@ -175,11 +180,7 @@ class SlurmAssassin(object):
         ])
 
         #--- note names of out and error file ---
-        if isinstance(out_file_name, list):
-            self.out_file_name = out_file_name
-        else:
-            self.out_file_name = [out_file_name]
-
+        self.out_file_name = out_file_name
         self.err_file_name = err_file_name
         #---
 
@@ -205,6 +206,29 @@ class SlurmAssassin(object):
 
         # if this string apears in out file the calculation must be finished
         self.end_of_calculation_string = "Have a nice day"
+
+    @property
+    def out_file_name(self):
+
+        # if wild cards are specified, we must dynamically generate the list
+        if self._wild_cards_in_out_files:
+            return reduce(lambda x,y: x + glob.glob(y), self._out_file_name, [])
+        else:
+            return self._out_file_name
+
+    @out_file_name.setter
+    def out_file_name(self, value):
+
+        # check if a list of files is given.    
+        if isinstance(value, list):
+            self._out_file_name = value
+
+            # if wild cards are specified, we must dynamically generate the list
+            self._wild_cards_in_out_files = np.any([("*" in f) for f in value])
+                
+        else:
+            self._out_file_name = [value]
+            self._wild_cards_in_out_files = "*" in value
 
     @staticmethod
     def time_now():

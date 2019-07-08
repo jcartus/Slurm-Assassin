@@ -5,6 +5,7 @@ Author: Johannes Cartus, TU Graz, 04.07.2019
 import numpy as np
 import unittest
 import os
+import shutil
 
 from collections import defaultdict
 
@@ -201,6 +202,7 @@ class TestCodeFailuresAreRecognized(unittest.TestCase):
             pass
 
 
+    
 
 
 
@@ -277,6 +279,89 @@ class TestNotifyOnlyMode(unittest.TestCase):
             os.remove(logfile)
         except FileNotFoundError:
             pass
+
+
+
+class TestOutfileParsing(unittest.TestCase):
+
+    def setUp(self):
+
+        LoggerMock.reset_counter()
+
+    def test_outputfile_is_list(self):
+
+        assassin = SlurmAssassin()
+        assassin.out_file_name = ["File 1", "File 2", "File 3"]
+
+        # check main outfile
+        self.assertEqual(
+            "File 1",
+            assassin.out_file_name[0]
+        )
+
+        # check the whole list
+        self.assertEqual(
+            ["File 1", "File 2", "File 3"],
+            assassin.out_file_name
+        )
+    
+    def test_wildcards_in_output(self):
+
+        #--- create dummy file structure ---
+        folder = "tmp_test_wildcards"
+        files = sorted([
+            os.path.join(folder, str(i), "test_" + str(i) + ".test") \
+                for i in range(3)
+        ])
+
+        # add another file to first folder than does not fit the scheme
+        files_with_extra = sorted(files + [os.path.join(folder, "0/xxx.test")])
+
+
+        for f in files_with_extra:
+            try:
+                # make dir
+                os.makedirs(os.path.dirname(f))
+                
+            except OSError as ex:
+                pass
+
+            try:
+                # touch file name 
+                open(f, "a").close()
+            except IOError as ex:
+                self.fail("Could not create dummy outfile " + str(ex))
+        #---
+
+        assassin = SlurmAssassin()
+
+        # test single wildcard string
+        assassin.out_file_name = folder + "/*/test_*.test"
+        self.assertEqual(files, sorted(assassin.out_file_name))
+
+        # test single wildcard string w/ extra file
+        assassin.out_file_name = folder + "/*/*.test"
+        self.assertEqual(files_with_extra, sorted(assassin.out_file_name))
+
+        # test list of wildcard strings (w/ extra)
+        assassin.out_file_name = [
+            folder + "/" + str(i) + "/*.test" for i in range(3)
+        ]
+        self.assertEqual(files_with_extra, sorted(assassin.out_file_name))
+        
+
+        #--- teardown (delete folder) ---
+        try:
+            shutil.rmtree(folder, ignore_errors=True)
+        except Exception as ex:
+            self.fail("Could not remove folder " + str(ex))
+
+        #---
+
+        
+        
+
+
 
 if __name__ == '__main__':
     unittest.main()
