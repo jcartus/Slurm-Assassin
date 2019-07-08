@@ -1,8 +1,3 @@
 numpy
 scipy
-time
 datetime
-subprocess
-email
-smtplib
-argsparse
