@@ -14,10 +14,5 @@ setup(
     version='0.0',
     description='A script to start/monitor calculations on a Slurm calculation system',
     author='Johannes Cartus',
-    packages=[
-        name, 
-    ],
-    package_dir={
-        name: 'src',
-    }
+    py_modules=['assassin']
 )

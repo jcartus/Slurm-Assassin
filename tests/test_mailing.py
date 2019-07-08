@@ -5,8 +5,8 @@ Author:
     Johannes Cartus, TU Graz, 04.07.2019
 """
 
-from assassin import EMailHandler
-from assassin import Logger
+from SlurmAssassin import EMailHandler
+from SlurmAssassin import Logger
 
 Logger.name_of_logfile = "mail_test.log"
 

@@ -8,8 +8,8 @@ import os
 
 from collections import defaultdict
 
-from assassin import SlurmAssassin, Logger, EMailHandler
-from assassin import CalculationCrashed, CalculationTimeout
+from SlurmAssassin import SlurmAssassin, Logger, EMailHandler
+from SlurmAssassin import CalculationCrashed, CalculationTimeout
 
 
 utilities_path = os.path.join(
