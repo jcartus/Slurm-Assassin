@@ -118,6 +118,7 @@ class EMailHandler(object):
         self._logger = self._default_logger if logger is None else logger
             
     def _log(self, msg, level=0):
+        msg = "[Mailer] " + msg
         self._logger.log(msg=msg, level=level)
 
     def send_email(self, subject, message):
@@ -129,10 +130,17 @@ class EMailHandler(object):
         msg['Subject'] = self.subject_prefix + subject
 
         self._log("Sending mail to " + self.recipient_address + ": " + subject)
-       
-        s = smtplib.SMTP('localhost')
-        s.send_message(msg)
-        s.quit()
+
+        try:       
+            s = smtplib.SMTP('localhost')
+            s.send_message(msg)
+            s.quit()
+
+        except ConnectionRefusedError as ex:
+            self._log("Could not set up connection to localhost! " + str(ex))
+
+        except Exception as ex:
+            self._log("Un unexpected error occured! " + str(ex))
     
 
 class SlurmAssassin(object):
