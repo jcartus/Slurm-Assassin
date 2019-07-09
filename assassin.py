@@ -735,7 +735,13 @@ the main output file.
 It must always be produced. If the (first) output 
 file is not found the assassin will assume the calculation to be crashed and 
 kill the job. The first/main output file will also be checked for phrases that 
-indicate the calculation to be finished (E.g. 'Have a nice day').""",
+indicate the calculation to be finished (E.g. 'Have a nice day').
+
+It is also possible to put down wildcards in the specification of the out files.
+If a wild card is given in the (first element of a list of) output file path(s)
+the main outfile will be which ever file matches the search string and is 
+first by alphabetical order.
+""",
         default="aims.out",
         type=str,
         nargs="+",
