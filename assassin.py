@@ -137,10 +137,10 @@ class EMailHandler(object):
             s.quit()
 
         except ConnectionRefusedError as ex:
-            self._log("Could not set up connection to localhost! " + str(ex))
+            self._log("Could not set up connection to localhost! " + str(ex), 3)
 
         except Exception as ex:
-            self._log("Un unexpected error occured! " + str(ex))
+            self._log("Un unexpected error occured! " + str(ex), 3)
     
 
 class SlurmAssassin(object):
