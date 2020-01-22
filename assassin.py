@@ -729,7 +729,7 @@ command, from which
 the assassin may infer that the calculation is still running as long as they 
 keep being updated. You may specify multiple files, e.g. in case a cube file 
 or something similar is generated during the calculation. In this case any 
-change in ANY of the files will surfice for the calculation not to be killed.
+change in ANY of the files will suffice for the calculation not to be killed.
 The first output file in the list (if more than one are specified) should be 
 the main output file.
 It must always be produced. If the (first) output 
@@ -788,3 +788,4 @@ first by alphabetical order.
     args = parser.parse_args()
     main(args)
        
+
